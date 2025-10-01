@@ -107,38 +107,38 @@ impl Formulas {
     pub fn normalize(&mut self, index: u32) -> u32 {
         assert!((index as usize) < self.0.len());
         match self.0[index as usize] {
-            Atom(_) => return index,
+            Atom(_) => index,
             Neg(j) => {
-                return self.normalize_negated(j);
+                self.normalize_negated(j)
             }
             X(i) => {
                 let idx2 = self.normalize(i);
                 self.0.push(X(idx2));
-                return self.0.len() as u32 - 1;
+                self.0.len() as u32 - 1
             }
             U(i, j) => {
                 let idx2 = self.normalize(i);
                 let idx3 = self.normalize(j);
                 self.0.push(U(idx2, idx3));
-                return self.0.len() as u32 - 1;
+                self.0.len() as u32 - 1
             }
             R(i, j) => {
                 let idx2 = self.normalize(i);
                 let idx3 = self.normalize(j);
                 self.0.push(R(idx2, idx3));
-                return self.0.len() as u32 - 1;
+                self.0.len() as u32 - 1
             }
             And(i, j) => {
                 let idx2 = self.normalize(i);
                 let idx3 = self.normalize(j);
                 self.0.push(And(idx2, idx3));
-                return self.0.len() as u32 - 1;
+                self.0.len() as u32 - 1
             }
             Or(i, j) => {
                 let idx2 = self.normalize(i);
                 let idx3 = self.normalize(j);
                 self.0.push(Or(idx2, idx3));
-                return self.0.len() as u32 - 1;
+                self.0.len() as u32 - 1
             }
         }
     }
