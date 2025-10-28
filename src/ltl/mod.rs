@@ -23,7 +23,17 @@ impl<'a> From<Formula<'a>> for u32 {
 }
 
 impl Formulas {
+    pub fn constant(&mut self, val: bool) -> u32 {
+        let idx = self.atom(1);
+        let idx2 = self.neg(idx);
+        if val {
+            self.or(idx, idx2)
+        } else {
+            self.and(idx, idx2)
+        }
+    }
     pub fn atom(&mut self, id: Q) -> u32 {
+        assert!(id > 0);
         self.0.push(Atom(id));
         self.0.len() as u32 - 1
     }
@@ -42,6 +52,14 @@ impl Formulas {
         assert!((index_until as usize) < self.0.len());
         self.0.push(U(index_hold, index_until));
         self.0.len() as u32 - 1
+    }
+    pub fn globally(&mut self, index_holds: u32) -> u32 {
+        let f = self.constant(false);
+        self.release(f, index_holds)
+    }
+    pub fn finally(&mut self, index_until: u32) -> u32 {
+        let t = self.constant(true);
+        self.until(t, index_until)
     }
     pub fn release(&mut self, index_release: u32, index_holds: u32) -> u32 {
         assert!((index_release as usize) < self.0.len());
@@ -108,9 +126,7 @@ impl Formulas {
         assert!((index as usize) < self.0.len());
         match self.0[index as usize] {
             Atom(_) => index,
-            Neg(j) => {
-                self.normalize_negated(j)
-            }
+            Neg(j) => self.normalize_negated(j),
             X(i) => {
                 let idx2 = self.normalize(i);
                 self.0.push(X(idx2));
@@ -161,7 +177,7 @@ impl<'a> std::fmt::Display for Formula<'a> {
         match op {
             Atom(x) => write!(f, "{x}"),
             Neg(i) => {
-                write!(f, "~")?;
+                write!(f, "\u{00ac}")?;
                 std::fmt::Display::fmt(&Formula(self.0, i), f)
             }
             X(i) => {
@@ -235,8 +251,8 @@ mod tests {
         let len2 = formulas.0.len();
         let s = formulas.access(result).to_string();
         let s2 = formulas.access(result2).to_string();
-        assert_eq!(s, "~((1)⋁(2))U(X[(1)⋀(2)])");
-        assert_eq!(s2, "((~1)⋀(~2))R(X[(~1)⋁(~2)])");
+        assert_eq!(s, "¬((1)⋁(2))U(X[(1)⋀(2)])");
+        assert_eq!(s2, "((¬1)⋀(¬2))R(X[(¬1)⋁(¬2)])");
         assert!(len1 * 2 <= len2)
     }
 }

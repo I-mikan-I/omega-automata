@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![cfg_attr(test, allow(non_snake_case))]
 mod automata;
 mod ltl;
 
