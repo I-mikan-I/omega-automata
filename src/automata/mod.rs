@@ -1,9 +1,12 @@
 #![allow(clippy::upper_case_acronyms)]
 use super::ltl;
 use rand::random_range;
+use std::cmp;
 use std::collections::*;
+use std::hash::BuildHasher;
 
 pub type Q = u32;
+const SELF: u32 = u32::MAX;
 pub type E = u32;
 
 #[derive(Debug, Default, Clone)]
@@ -12,14 +15,19 @@ struct NBW {
     accepting: HashSet<Q>,
 }
 
+type ABWPhi = (BTreeSet<i64>, BTreeSet<Q>);
 #[derive(Debug, Default, Clone)]
 struct ABW {
     nodes: u32,
     // sets of symbols E encoded as S: E = { 2e | \forall e \in 2e : !e \not \in S }.
     // E.g. S = {1, -2} encodes E = { 2e | 1 \in 2e \wedge -2 \in 2e }
-    phi: HashMap<Q, Vec<(HashSet<i64>, HashSet<Q>)>>,
+    phi: HashMap<Q, Vec<ABWPhi>>,
     labels: Vec<String>,
-    accepting: HashSet<Q>,
+    // co-buechi
+    rejecting: HashSet<Q>,
+
+    // maps phi hashes -> nodes
+    nodes_unique_cache: HashMap<u64, Q>,
 }
 struct DotABW<'a>(&'a ABW);
 
@@ -44,7 +52,7 @@ impl<'a> std::fmt::Display for DotABW<'a> {
                 r#"  {}[label="{}",shape="{}"];"#,
                 i,
                 abw.labels[i as usize],
-                if abw.accepting.contains(&i) {
+                if abw.rejecting.contains(&i) {
                     "doubleoctagon"
                 } else {
                     "ellipse"
@@ -98,10 +106,49 @@ impl<'a> AsDot for &'a ABW {
     }
 }
 
-fn ltl_to_abw_rec(f: ltl::Formula<'_>, node_map: &mut HashMap<u32, u32>, abw: &mut ABW) -> u32 {
-    if let Some(&v) = node_map.get(&f.1) {
-        return v;
+fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering> {
+    let syms1 = &trans1.0;
+    let syms2 = &trans2.0;
+
+    let states1 = &trans1.1;
+    let states2 = &trans2.1;
+
+    fn syms_leq(syms1: &BTreeSet<i64>, syms2: &BTreeSet<i64>) -> bool {
+        syms1.iter().all(|&i| !syms2.contains(&-i))
     }
+
+    if states1.is_subset(states2) && syms_leq(syms2, syms1) {
+        Some(cmp::Ordering::Greater)
+    } else if states2.is_subset(states1) && syms_leq(syms1, syms2) {
+        Some(cmp::Ordering::Less)
+    } else {
+        None
+    }
+}
+
+fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
+    'outer: for i in 0..transitions.len() {
+        let mut k = i + 1;
+        while k < transitions.len() {
+            match transition_cmp(&transitions[i], &transitions[k]) {
+                Some(cmp::Ordering::Less) => {
+                    transitions.remove(i);
+                    continue 'outer;
+                }
+                Some(cmp::Ordering::Greater) => {
+                    transitions.remove(k);
+                    continue;
+                }
+                None => {}
+                _ => panic!(),
+            }
+            k += 1;
+    }
+    }
+    transitions.sort();
+}
+
+fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
     let formulas = f.0;
     macro_rules! phi_and {
         ($phi1:expr, $phi2_iter:expr) => {
@@ -132,65 +179,101 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, node_map: &mut HashMap<u32, u32>, abw: &m
                 .collect::<Vec<_>>()
         };
     }
-    match formulas[f.1] {
+    let (mut new_phi, rejecting) = match formulas[f.1] {
         ltl::Operator::Atom(p) => {
             // duplicating atoms atm
-            abw.phi
-                .insert(abw.nodes, vec![(HashSet::from([p as i64]), HashSet::new())]);
+            (vec![(BTreeSet::from([p as i64]), BTreeSet::new())], false)
         }
         ltl::Operator::Neg(p) => {
             // duplicating atoms atm
             if let ltl::Operator::Atom(atom) = formulas[p] {
-                abw.phi.insert(
-                    abw.nodes,
-                    vec![(HashSet::from([-(atom as i64)]), HashSet::new())],
-                );
+                (
+                    vec![(BTreeSet::from([-(atom as i64)]), BTreeSet::new())],
+                false,
+                )
             } else {
                 panic!()
             }
         }
         ltl::Operator::X(i) => {
-            let node = ltl_to_abw_rec(formulas.access(i), node_map, abw);
-            abw.phi
-                .insert(abw.nodes, vec![(HashSet::new(), HashSet::from([node]))]);
+            let node = ltl_to_abw_rec(formulas.access(i), abw);
+            (vec![(BTreeSet::new(), BTreeSet::from([node]))], false)
         }
         ltl::Operator::U(i, j) => {
-            let node1 = ltl_to_abw_rec(formulas.access(i), node_map, abw);
-            let node2 = ltl_to_abw_rec(formulas.access(j), node_map, abw);
+            let node1 = ltl_to_abw_rec(formulas.access(i), abw);
+            let node2 = ltl_to_abw_rec(formulas.access(j), abw);
 
             let cont = abw.phi[&node1]
                 .iter()
                 .cloned()
                 .map(|(es, mut qs)| {
-                    qs.insert(abw.nodes);
+                    qs.insert(SELF);
                     (es, qs)
                 })
                 .collect::<Vec<_>>();
-            abw.phi
-                .insert(abw.nodes, phi_or!(abw.phi[&node2].clone(), cont));
+            let mut phi_new = phi_or!(abw.phi[&node2].clone(), cont);
+            transitions_simpl(&mut phi_new);
+(phi_new, true)
         }
         ltl::Operator::R(i, j) => {
-            let node1 = ltl_to_abw_rec(formulas.access(i), node_map, abw);
-            let node2 = ltl_to_abw_rec(formulas.access(j), node_map, abw);
-            let new_edge = [(HashSet::new(), HashSet::from([abw.nodes]))];
+            let node1 = ltl_to_abw_rec(formulas.access(i), abw);
+            let node2 = ltl_to_abw_rec(formulas.access(j), abw);
+            let new_edge = [(BTreeSet::new(), BTreeSet::from([SELF]))];
             let cont = abw.phi[&node1].iter().chain(new_edge.iter());
-            abw.phi
-                .insert(abw.nodes, phi_and!(abw.phi[&node2].clone(), cont.clone()));
-            abw.accepting.insert(abw.nodes);
+            let mut phi_new = phi_and!(abw.phi[&node2].clone(), cont.clone());
+            transitions_simpl(&mut phi_new);
+(phi_new, false)
         }
         ltl::Operator::And(i, j) => {
-            let node1 = ltl_to_abw_rec(formulas.access(i), node_map, abw);
-            let node2 = ltl_to_abw_rec(formulas.access(j), node_map, abw);
+            let node1 = ltl_to_abw_rec(formulas.access(i), abw);
+            let node2 = ltl_to_abw_rec(formulas.access(j), abw);
 
-            let phi_new = phi_and!(abw.phi[&node1], abw.phi[&node2].iter());
-            abw.phi.insert(abw.nodes, phi_new);
+            let mut phi_new = phi_and!(abw.phi[&node1], abw.phi[&node2].iter());
+            transitions_simpl(&mut phi_new);
+(phi_new, false)
         }
         ltl::Operator::Or(i, j) => {
-            let node1 = ltl_to_abw_rec(formulas.access(i), node_map, abw);
-            let node2 = ltl_to_abw_rec(formulas.access(j), node_map, abw);
-            let phi_new = phi_or!(abw.phi[&node1].clone(), abw.phi[&node2].clone());
-            abw.phi.insert(abw.nodes, phi_new);
+            let node1 = ltl_to_abw_rec(formulas.access(i), abw);
+            let node2 = ltl_to_abw_rec(formulas.access(j), abw);
+            let mut phi_new = phi_or!(abw.phi[&node1].clone(), abw.phi[&node2].clone());
+transitions_simpl(&mut phi_new);
+            (phi_new, false)
         }
+    };
+    {
+        let hash = abw.nodes_unique_cache.hasher().hash_one(&new_phi);
+        if let Some(q) = abw.nodes_unique_cache.get(&hash) {
+            let mut phi_expected: Vec<_> = new_phi
+                .iter()
+                .cloned()
+                .map(|(syms, mut nodes)| {
+                    if nodes.contains(&SELF) {
+                        nodes.remove(&SELF);
+                        nodes.insert(*q);
+                    }
+                    (syms, nodes)
+                })
+                .collect();
+            transitions_simpl(&mut phi_expected);
+            if abw.phi[q] == phi_expected && (rejecting == abw.rejecting.contains(q)) {
+                abw.labels[*q as usize].push_str(&format!("\\n{}", f.to_string()));
+                return *q;
+            }
+        } else {
+            abw.nodes_unique_cache.insert(hash, abw.nodes);
+            new_phi.iter_mut().for_each(|(_, nodes)| {
+                assert!(!nodes.contains(&abw.nodes));
+                if nodes.contains(&SELF) {
+                    nodes.remove(&SELF);
+                    nodes.insert(abw.nodes);
+        }
+});
+            transitions_simpl(&mut new_phi);
+        }
+    }
+    abw.phi.insert(abw.nodes, new_phi);
+    if rejecting {
+        abw.rejecting.insert(abw.nodes);
     }
     assert!(abw.labels.len() == abw.nodes as usize);
     abw.labels.push(f.to_string());
@@ -199,12 +282,44 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, node_map: &mut HashMap<u32, u32>, abw: &m
 }
 
 /**
- * Must be normaliled.
+ * Must be normalized.
  */
 fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
-    let mut node_map = HashMap::new();
-    let mut abw = ABW::default();
-    let _ = ltl_to_abw_rec(f, &mut node_map, &mut abw);
+        let mut abw = ABW::default();
+    let root = ltl_to_abw_rec(f, &mut abw);
+    let mut on_stack: Vec<bool> = vec![false; abw.nodes as usize];
+    let mut stack: Vec<Q> = vec![root];
+    on_stack[root as usize] = true;
+    let add_nodes = |q, stack: &mut Vec<Q>, on_stack: &mut Vec<bool>| {
+        abw.phi[&q]
+            .iter()
+            .flat_map(|(_, succs)| succs.iter())
+            .cloned()
+            .filter_map(|q| {
+                if on_stack[q as usize] {
+                    None
+                } else {
+                    on_stack[q as usize] = true;
+                    Some(q)
+                }
+            })
+            .for_each(|q| stack.push(q));
+    };
+    add_nodes(root, &mut stack, &mut on_stack);
+    while let Some(q) = stack.pop() {
+        add_nodes(q, &mut stack, &mut on_stack);
+    }
+    for q in 0..abw.nodes {
+        if !on_stack[q as usize] {
+            let hash = abw.nodes_unique_cache.hasher().hash_one(&abw.phi[&q]);
+            if abw.nodes_unique_cache.get(&hash) == Some(&q) {
+                abw.nodes_unique_cache.remove(&hash);
+            }
+            abw.phi.remove(&q);
+            abw.labels[q as usize] = "".into();
+            abw.rejecting.remove(&q);
+        }
+    }
     abw
 }
 
