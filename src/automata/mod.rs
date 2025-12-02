@@ -31,6 +31,15 @@ struct ABW {
 }
 struct DotABW<'a>(&'a ABW);
 
+type GBAPhi = (BTreeSet<i64>, Q);
+#[derive(Debug, Default, Clone)]
+struct GBA {
+    nodes: u32,
+
+    phi: HashMap<Q, Vec<GBAPhi>>,
+    accepting: HashSet<Q>,
+}
+
 impl DotABW<'_> {
     fn random_color() -> [u8; 3] {
         let hue: f32 = random_range(0.0..360.0);
@@ -143,7 +152,7 @@ fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
                 _ => panic!(),
             }
             k += 1;
-    }
+        }
     }
     transitions.sort();
 }
@@ -189,7 +198,7 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
             if let ltl::Operator::Atom(atom) = formulas[p] {
                 (
                     vec![(BTreeSet::from([-(atom as i64)]), BTreeSet::new())],
-                false,
+                    false,
                 )
             } else {
                 panic!()
@@ -213,7 +222,7 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
                 .collect::<Vec<_>>();
             let mut phi_new = phi_or!(abw.phi[&node2].clone(), cont);
             transitions_simpl(&mut phi_new);
-(phi_new, true)
+            (phi_new, true)
         }
         ltl::Operator::R(i, j) => {
             let node1 = ltl_to_abw_rec(formulas.access(i), abw);
@@ -222,7 +231,7 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
             let cont = abw.phi[&node1].iter().chain(new_edge.iter());
             let mut phi_new = phi_and!(abw.phi[&node2].clone(), cont.clone());
             transitions_simpl(&mut phi_new);
-(phi_new, false)
+            (phi_new, false)
         }
         ltl::Operator::And(i, j) => {
             let node1 = ltl_to_abw_rec(formulas.access(i), abw);
@@ -230,13 +239,13 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
 
             let mut phi_new = phi_and!(abw.phi[&node1], abw.phi[&node2].iter());
             transitions_simpl(&mut phi_new);
-(phi_new, false)
+            (phi_new, false)
         }
         ltl::Operator::Or(i, j) => {
             let node1 = ltl_to_abw_rec(formulas.access(i), abw);
             let node2 = ltl_to_abw_rec(formulas.access(j), abw);
             let mut phi_new = phi_or!(abw.phi[&node1].clone(), abw.phi[&node2].clone());
-transitions_simpl(&mut phi_new);
+            transitions_simpl(&mut phi_new);
             (phi_new, false)
         }
     };
@@ -256,7 +265,7 @@ transitions_simpl(&mut phi_new);
                 .collect();
             transitions_simpl(&mut phi_expected);
             if abw.phi[q] == phi_expected && (rejecting == abw.rejecting.contains(q)) {
-                abw.labels[*q as usize].push_str(&format!("\\n{}", f.to_string()));
+                abw.labels[*q as usize].push_str(&format!("\\n{}", f));
                 return *q;
             }
         } else {
@@ -266,8 +275,8 @@ transitions_simpl(&mut phi_new);
                 if nodes.contains(&SELF) {
                     nodes.remove(&SELF);
                     nodes.insert(abw.nodes);
-        }
-});
+                }
+            });
             transitions_simpl(&mut new_phi);
         }
     }
@@ -285,7 +294,7 @@ transitions_simpl(&mut phi_new);
  * Must be normalized.
  */
 fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
-        let mut abw = ABW::default();
+    let mut abw = ABW::default();
     let root = ltl_to_abw_rec(f, &mut abw);
     let mut on_stack: Vec<bool> = vec![false; abw.nodes as usize];
     let mut stack: Vec<Q> = vec![root];
@@ -295,12 +304,12 @@ fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
             .iter()
             .flat_map(|(_, succs)| succs.iter())
             .cloned()
-            .filter_map(|q| {
+            .filter(|&q| {
                 if on_stack[q as usize] {
-                    None
+                    false
                 } else {
                     on_stack[q as usize] = true;
-                    Some(q)
+                    true
                 }
             })
             .for_each(|q| stack.push(q));
