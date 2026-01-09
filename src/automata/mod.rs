@@ -1,9 +1,12 @@
 #![allow(clippy::upper_case_acronyms)]
 use super::ltl;
 use rand::random_range;
+use std::borrow::Borrow;
 use std::cmp;
 use std::collections::*;
 use std::hash::BuildHasher;
+use std::marker::PhantomData;
+use std::ops::Index;
 
 pub type Q = u32;
 const SELF: u32 = u32::MAX;
@@ -32,12 +35,14 @@ struct ABW {
 struct DotABW<'a>(&'a ABW);
 
 type GBAPhi = (BTreeSet<i64>, Q);
+type GBAAccepting = Vec<(Q, usize)>;
 #[derive(Debug, Default, Clone)]
 struct GBA {
     nodes: u32,
-
+    labels: Vec<String>,
     phi: HashMap<Q, Vec<GBAPhi>>,
-    accepting: HashSet<Q>,
+    // accepting transitions
+    accepting: Vec<GBAAccepting>,
 }
 
 impl DotABW<'_> {
@@ -114,7 +119,9 @@ impl<'a> AsDot for &'a ABW {
         DotABW(self)
     }
 }
-
+/**
+ * trans1 < trans2 <=> trans1.0 \subseteq trans2.0 and trans1.1 \supseteq trans2.1 (trans1 implies trans2)
+ */
 fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering> {
     let syms1 = &trans1.0;
     let syms2 = &trans2.0;
@@ -122,24 +129,85 @@ fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering> {
     let states1 = &trans1.1;
     let states2 = &trans2.1;
 
-    fn syms_leq(syms1: &BTreeSet<i64>, syms2: &BTreeSet<i64>) -> bool {
+    fn syms_subset(syms1: &BTreeSet<i64>, syms2: &BTreeSet<i64>) -> bool {
         syms1.iter().all(|&i| !syms2.contains(&-i))
     }
 
-    if states1.is_subset(states2) && syms_leq(syms2, syms1) {
+    if states1.is_subset(states2) && syms_subset(syms2, syms1) {
         Some(cmp::Ordering::Greater)
-    } else if states2.is_subset(states1) && syms_leq(syms1, syms2) {
+    } else if states2.is_subset(states1) && syms_subset(syms1, syms2) {
         Some(cmp::Ordering::Less)
     } else {
         None
     }
 }
 
+fn id(t: &ABWPhi) -> &ABWPhi {
+    t
+}
+
+struct IdentityAccessor {}
+
+impl<'this> AccessorLifetime<'this, &'this Self> for IdentityAccessor {
+    type Item = &'this ABWPhi;
+}
+
+impl Accessor<ABWPhi> for IdentityAccessor {
+    fn access<'this, 'a>(
+        &'this self,
+        k: &'a ABWPhi,
+    ) -> <Self as AccessorLifetime<'a, &'a Self>>::Item {
+        k
+    }
+}
+
 fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
+    let acc = IdentityAccessor {};
+    transitions_simpl_keyed(transitions, acc);
+}
+
+trait AccessorLifetime<'this, ExtraParam> {
+    type Item: Borrow<ABWPhi>;
+}
+
+trait Accessor<K>
+where
+    for<'this> Self: AccessorLifetime<'this, &'this Self>,
+{
+    fn access<'this, 'a>(&'this self, k: &'a K) -> <Self as AccessorLifetime<'a, &'a Self>>::Item;
+}
+
+struct ClosureAccessor<'a, F, K>
+where
+    F: Fn(&'a K) -> &'a ABWPhi,
+{
+    closure: F,
+    _a: PhantomData<&'a K>,
+}
+
+impl<'this, 'a, K, F: Fn(&K) -> &'a ABWPhi> AccessorLifetime<'this, &'this Self>
+    for ClosureAccessor<'a, F, K>
+{
+    type Item = &'this ABWPhi;
+}
+
+impl<'this, K, F: Fn(&K) -> &'this ABWPhi> Accessor<K> for ClosureAccessor<'this, F, K> {
+    fn access<'a, 'b>(&'a self, k: &'b K) -> <Self as AccessorLifetime<'b, &'b Self>>::Item {
+        let c = &self.closure;
+        c(k)
+    }
+}
+
+fn transitions_simpl_keyed<'a, K, A: Accessor<K>>(transitions: &'a mut Vec<K>, access: A) {
     'outer: for i in 0..transitions.len() {
         let mut k = i + 1;
         while k < transitions.len() {
-            match transition_cmp(&transitions[i], &transitions[k]) {
+            let left = access.access(&transitions[i]);
+            let right = access.access(&transitions[k]);
+            let result = transition_cmp(left.borrow(), right.borrow());
+            drop(left);
+            drop(right);
+            match result {
                 Some(cmp::Ordering::Less) => {
                     transitions.remove(i);
                     continue 'outer;
@@ -154,32 +222,36 @@ fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
             k += 1;
         }
     }
-    transitions.sort();
+    transitions.sort_by(|l, r| {
+        let lv = access.access(&l);
+        let rv = access.access(&r);
+        lv.borrow().cmp(rv.borrow())
+    });
 }
-
+macro_rules! phi_and {
+    ($phi1:expr, $phi2_iter:expr) => {
+        $phi1
+            .iter()
+            .flat_map(|(es, qs)| {
+                $phi2_iter.filter_map(|(es2, qs2)| {
+                    let mut es = es.clone();
+                    let mut qs = qs.clone();
+                    for v in es2 {
+                        if es.contains(&-v) {
+                            return None;
+                        }
+                        es.insert(*v);
+                    }
+                    qs.extend(qs2);
+                    Some((es, qs))
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+}
 fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
     let formulas = f.0;
-    macro_rules! phi_and {
-        ($phi1:expr, $phi2_iter:expr) => {
-            $phi1
-                .iter()
-                .flat_map(|(es, qs)| {
-                    $phi2_iter.filter_map(|(es2, qs2)| {
-                        let mut es = es.clone();
-                        let mut qs = qs.clone();
-                        for v in es2 {
-                            if es.contains(&-v) {
-                                return None;
-                            }
-                            es.insert(*v);
-                        }
-                        qs.extend(qs2);
-                        Some((es, qs))
-                    })
-                })
-                .collect::<Vec<_>>()
-        };
-    }
+
     macro_rules! phi_or {
         ($phi1:expr, $phi2:expr) => {
             $phi1
@@ -332,9 +404,66 @@ fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
     abw
 }
 
-struct GBW {
-    phi: HashMap<Q, Vec<(HashSet<E>, HashSet<Q>)>>,
-    accepting: Vec<(Q, HashSet<E>, Q)>,
+fn abwphi_to_gbwphi(
+    m: &ABW,
+    abwphi: Vec<ABWPhi>,
+    out: &mut GBA,
+    rejecting_accepting_map: &mut HashMap<Q, usize>,
+) -> Vec<GBAPhi> {
+    abwphi
+        .into_iter()
+        .map(|(syms, states)| {
+            let node = vwabw_to_gbw_rec(m, states, out, rejecting_accepting_map);
+            return (syms, node);
+        })
+        .collect()
+}
+
+fn vwabw_to_gbw_rec(
+    m: &ABW,
+    state: BTreeSet<Q>,
+    out: &mut GBA,
+    rejecting_accepting_map: &mut HashMap<Q, usize>,
+) -> u32 {
+    let node = out.nodes;
+    // true
+    let mut transitions: Vec<ABWPhi> = vec![(Default::default(), Default::default())];
+    for q in state {
+        let trans2 = &m.phi[&q];
+        transitions = phi_and!(transitions, trans2.iter());
+    }
+    // let trans = abwphi_to_gbwphi(m, trans, out);
+    // update final
+    for &rejecting in &m.rejecting {
+        let index = rejecting_accepting_map[&rejecting];
+        let mut new_transitions = Vec::new();
+        for (i, trans @ (_, states)) in transitions.iter().enumerate() {
+            if !states.contains(&rejecting) {
+                new_transitions.push(i);
+            } else {
+                let out_rejecting = &m.phi[&rejecting];
+                if out_rejecting.iter().any(|t| {
+                    !t.1.contains(&rejecting)
+                        && transition_cmp(trans, t) == Some(cmp::Ordering::Less)
+                }) {
+                    new_transitions.push(i);
+                }
+            }
+        }
+        let closure = |idx: &usize| -> &ABWPhi { &transitions[*idx] };
+        let accessor: ClosureAccessor<_, _> = ClosureAccessor {
+            closure,
+            _a: PhantomData::default(),
+        };
+        let t: &mut _ = &mut new_transitions;
+        transitions_simpl_keyed(t, accessor);
+        out.accepting[index] = new_transitions.into_iter().map(|idx| (node, idx)).collect();
+    }
+    todo!()
+}
+
+fn vwabw_to_gbw(m: &ABW) -> GBA {
+    todo!()
 }
 
 #[cfg(test)]
