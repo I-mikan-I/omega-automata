@@ -5,8 +5,8 @@ use std::borrow::Borrow;
 use std::cmp;
 use std::collections::*;
 use std::hash::BuildHasher;
+use std::iter;
 use std::marker::PhantomData;
-use std::ops::Index;
 
 pub type Q = u32;
 const SELF: u32 = u32::MAX;
@@ -22,6 +22,7 @@ type ABWPhi = (BTreeSet<i64>, BTreeSet<Q>);
 #[derive(Debug, Default, Clone)]
 struct ABW {
     nodes: u32,
+    initial: Q,
     // sets of symbols E encoded as S: E = { 2e | \forall e \in 2e : !e \not \in S }.
     // E.g. S = {1, -2} encodes E = { 2e | 1 \in 2e \wedge -2 \in 2e }
     phi: HashMap<Q, Vec<ABWPhi>>,
@@ -33,26 +34,102 @@ struct ABW {
     nodes_unique_cache: HashMap<u64, Q>,
 }
 struct DotABW<'a>(&'a ABW);
+struct DotGBW<'a>(&'a GBW);
 
-type GBAPhi = (BTreeSet<i64>, Q);
-type GBAAccepting = Vec<(Q, usize)>;
-#[derive(Debug, Default, Clone)]
-struct GBA {
+type GWBPhi = (BTreeSet<i64>, Q);
+type GBWAccepting = Vec<(Q, usize)>;
+#[derive(Debug, Clone)]
+struct GBW {
     nodes: u32,
+    initial: Q,
     labels: Vec<String>,
-    phi: HashMap<Q, Vec<GBAPhi>>,
+    phi: HashMap<Q, Vec<GWBPhi>>,
     // accepting transitions
-    accepting: Vec<GBAAccepting>,
+    accepting: Vec<GBWAccepting>,
+    unique_cache: HashMap<BTreeSet<Q>, Q>,
 }
 
-impl DotABW<'_> {
-    fn random_color() -> [u8; 3] {
-        let hue: f32 = random_range(0.0..360.0);
-        let lightness: f32 = random_range(0.2..=0.9);
-        let [r, g, b, _] = color::OpaqueColor::<color::Oklch>::new([lightness, 0.2, hue])
-            .to_rgba8()
-            .to_u8_array();
+impl GBW {
+    // create with true state
+    const TRUE: Q = 0;
+    fn new() -> Self {
+        let labels = vec!["true".into()];
+        let phi = HashMap::from_iter(iter::once((0u32, vec![(BTreeSet::new(), 0u32)])));
+        let unique_cache = HashMap::from_iter(std::iter::once((BTreeSet::new(), 0)));
+        Self {
+            nodes: 1,
+            initial: 0,
+            labels,
+            phi,
+            accepting: Default::default(),
+            unique_cache,
+        }
+    }
+    // add TRUE to each accepting set
+    fn finalize(&mut self) {
+        for t_i in &mut self.accepting {
+            t_i.push((Self::TRUE, 0));
+        }
+    }
+}
+
+fn random_color() -> String {
+    let hue: f32 = random_range(0.0..360.0);
+    let lightness: f32 = random_range(0.2..=0.9);
+    let [r, g, b, _] = color::OpaqueColor::<color::Oklch>::new([lightness, 0.2, hue])
+        .to_rgba8()
+        .to_u8_array();
+    format!(
+        "#{}",
         [r, g, b]
+            .into_iter()
+            .map(|i| format!("{i:02x}"))
+            .collect::<String>()
+    )
+}
+
+impl<'a> std::fmt::Display for DotGBW<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let accepting_colors: Vec<_> = (0..self.0.accepting.len())
+            .map(|_| random_color())
+            .collect();
+        write!(f, "digraph {{\n  rankdir=\"LR\";\n")?;
+        let gbw = self.0;
+        for i in 0..gbw.nodes {
+            writeln!(
+                f,
+                r#"  {}[label="{}",shape="ellipse"];"#,
+                i, gbw.labels[i as usize],
+            )?;
+        }
+        for (node, transitions) in &gbw.phi {
+            for (idx, (cond, succ)) in transitions.iter().enumerate() {
+                write!(f, "  {} -> {}", node, succ)?;
+                let mut condstring = String::new();
+                for (idx, &atom) in cond.iter().enumerate() {
+                    condstring.push_str(&format!(
+                        "{}{}",
+                        if idx > 0 { "\u{2227}" } else { "" },
+                        if atom > 0 {
+                            format!("{atom}")
+                        } else {
+                            format!("\u{00ac}{}", -atom)
+                        }
+                    ));
+                }
+                let colorstr = self
+                    .0
+                    .accepting
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, edges)| edges.contains(&(*node, idx)))
+                    .map(|(colidx, _)| accepting_colors[colidx].clone())
+                    .reduce(|lstr, rstr| lstr + ":" + rstr.as_str())
+                    .unwrap_or("black".into());
+                writeln!(f, " [label=\"{condstring}\", color=\"{colorstr}\"];",)?;
+            }
+        }
+        writeln!(f, "}}")
     }
 }
 
@@ -96,11 +173,8 @@ impl<'a> std::fmt::Display for DotABW<'a> {
                         }
                     ));
                 }
-                let colstr: String = Self::random_color()
-                    .into_iter()
-                    .map(|i| format!("{i:02x}"))
-                    .collect();
-                writeln!(f, " [label=\"{condstring}\",color=\"#{colstr}\"];",)?;
+                let colstr: String = random_color();
+                writeln!(f, " [label=\"{condstring}\",color=\"{colstr}\"];",)?;
             }
         }
         writeln!(f, "}}")
@@ -117,6 +191,14 @@ impl<'a> AsDot for &'a ABW {
 
     fn as_dot(&self) -> Self::T {
         DotABW(self)
+    }
+}
+
+impl<'a> AsDot for &'a GBW {
+    type T = DotGBW<'a>;
+
+    fn as_dot(&self) -> Self::T {
+        DotGBW(self)
     }
 }
 /**
@@ -153,17 +235,14 @@ impl<'this> AccessorLifetime<'this, &'this Self> for IdentityAccessor {
 }
 
 impl Accessor<ABWPhi> for IdentityAccessor {
-    fn access<'this, 'a>(
-        &'this self,
-        k: &'a ABWPhi,
-    ) -> <Self as AccessorLifetime<'a, &'a Self>>::Item {
+    fn access<'a>(&self, k: &'a ABWPhi) -> <Self as AccessorLifetime<'a, &'a Self>>::Item {
         k
     }
 }
 
 fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
     let acc = IdentityAccessor {};
-    transitions_simpl_keyed(transitions, acc);
+    transitions_simpl_keyed(transitions, acc, |_| true);
 }
 
 trait AccessorLifetime<'this, ExtraParam> {
@@ -174,7 +253,7 @@ trait Accessor<K>
 where
     for<'this> Self: AccessorLifetime<'this, &'this Self>,
 {
-    fn access<'this, 'a>(&'this self, k: &'a K) -> <Self as AccessorLifetime<'a, &'a Self>>::Item;
+    fn access<'a>(&self, k: &'a K) -> <Self as AccessorLifetime<'a, &'a Self>>::Item;
 }
 
 struct ClosureAccessor<'a, F, K>
@@ -185,6 +264,20 @@ where
     _a: PhantomData<&'a K>,
 }
 
+impl<'a, F, K> ClosureAccessor<'a, F, K> where F: Fn(&'a K) -> &'a ABWPhi {}
+
+impl<'a, F, K> From<F> for ClosureAccessor<'a, F, K>
+where
+    F: Fn(&'a K) -> &'a ABWPhi,
+{
+    fn from(closure: F) -> Self {
+        Self {
+            closure,
+            _a: Default::default(),
+        }
+    }
+}
+
 impl<'this, 'a, K, F: Fn(&K) -> &'a ABWPhi> AccessorLifetime<'this, &'this Self>
     for ClosureAccessor<'a, F, K>
 {
@@ -192,13 +285,17 @@ impl<'this, 'a, K, F: Fn(&K) -> &'a ABWPhi> AccessorLifetime<'this, &'this Self>
 }
 
 impl<'this, K, F: Fn(&K) -> &'this ABWPhi> Accessor<K> for ClosureAccessor<'this, F, K> {
-    fn access<'a, 'b>(&'a self, k: &'b K) -> <Self as AccessorLifetime<'b, &'b Self>>::Item {
+    fn access<'b>(&self, k: &'b K) -> <Self as AccessorLifetime<'b, &'b Self>>::Item {
         let c = &self.closure;
         c(k)
     }
 }
 
-fn transitions_simpl_keyed<'a, K, A: Accessor<K>>(transitions: &'a mut Vec<K>, access: A) {
+fn transitions_simpl_keyed<K, A: Accessor<K>, F: Fn(&K) -> bool>(
+    transitions: &mut Vec<K>,
+    access: A,
+    removable: F,
+) {
     'outer: for i in 0..transitions.len() {
         let mut k = i + 1;
         while k < transitions.len() {
@@ -209,11 +306,15 @@ fn transitions_simpl_keyed<'a, K, A: Accessor<K>>(transitions: &'a mut Vec<K>, a
             drop(right);
             match result {
                 Some(cmp::Ordering::Less) => {
-                    transitions.remove(i);
+                    if removable(&transitions[i]) {
+                        transitions.remove(i);
+                    }
                     continue 'outer;
                 }
                 Some(cmp::Ordering::Greater) => {
-                    transitions.remove(k);
+                    if removable(&transitions[k]) {
+                        transitions.remove(k);
+                    }
                     continue;
                 }
                 None => {}
@@ -223,8 +324,8 @@ fn transitions_simpl_keyed<'a, K, A: Accessor<K>>(transitions: &'a mut Vec<K>, a
         }
     }
     transitions.sort_by(|l, r| {
-        let lv = access.access(&l);
-        let rv = access.access(&r);
+        let lv = access.access(l);
+        let rv = access.access(r);
         lv.borrow().cmp(rv.borrow())
     });
 }
@@ -368,6 +469,7 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
 fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
     let mut abw = ABW::default();
     let root = ltl_to_abw_rec(f, &mut abw);
+    abw.initial = root;
     let mut on_stack: Vec<bool> = vec![false; abw.nodes as usize];
     let mut stack: Vec<Q> = vec![root];
     on_stack[root as usize] = true;
@@ -407,14 +509,14 @@ fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
 fn abwphi_to_gbwphi(
     m: &ABW,
     abwphi: Vec<ABWPhi>,
-    out: &mut GBA,
+    out: &mut GBW,
     rejecting_accepting_map: &mut HashMap<Q, usize>,
-) -> Vec<GBAPhi> {
+) -> Vec<GWBPhi> {
     abwphi
         .into_iter()
         .map(|(syms, states)| {
             let node = vwabw_to_gbw_rec(m, states, out, rejecting_accepting_map);
-            return (syms, node);
+            (syms, node)
         })
         .collect()
 }
@@ -422,10 +524,20 @@ fn abwphi_to_gbwphi(
 fn vwabw_to_gbw_rec(
     m: &ABW,
     state: BTreeSet<Q>,
-    out: &mut GBA,
+    out: &mut GBW,
     rejecting_accepting_map: &mut HashMap<Q, usize>,
 ) -> u32 {
+    if let Some(id) = out.unique_cache.get(&state) {
+        return *id;
+    }
     let node = out.nodes;
+    out.nodes += 1;
+    out.unique_cache.insert(state.clone(), node);
+    let label = state
+        .iter()
+        .map(|&q| m.labels[q as usize].as_str())
+        .fold(String::new(), |a, n| a + n + "\\n");
+    out.labels.push(label);
     // true
     let mut transitions: Vec<ABWPhi> = vec![(Default::default(), Default::default())];
     for q in state {
@@ -434,8 +546,13 @@ fn vwabw_to_gbw_rec(
     }
     // let trans = abwphi_to_gbwphi(m, trans, out);
     // update final
+    let mut not_removable = HashSet::new();
+    let mut new_accepting: HashMap<usize, Vec<(Q, usize)>> = HashMap::new();
     for &rejecting in &m.rejecting {
-        let index = rejecting_accepting_map[&rejecting];
+        let index = *rejecting_accepting_map.entry(rejecting).or_insert_with(|| {
+            out.accepting.push(Default::default());
+            out.accepting.len() - 1
+        });
         let mut new_transitions = Vec::new();
         for (i, trans @ (_, states)) in transitions.iter().enumerate() {
             if !states.contains(&rejecting) {
@@ -451,23 +568,62 @@ fn vwabw_to_gbw_rec(
             }
         }
         let closure = |idx: &usize| -> &ABWPhi { &transitions[*idx] };
-        let accessor: ClosureAccessor<_, _> = ClosureAccessor {
-            closure,
-            _a: PhantomData::default(),
-        };
-        let t: &mut _ = &mut new_transitions;
-        transitions_simpl_keyed(t, accessor);
-        out.accepting[index] = new_transitions.into_iter().map(|idx| (node, idx)).collect();
+        let accessor: ClosureAccessor<_, _> = closure.into();
+        transitions_simpl_keyed(&mut new_transitions, accessor, |_| true);
+        not_removable.extend(new_transitions.iter().cloned());
+        new_accepting.insert(
+            index,
+            new_transitions.into_iter().map(|idx| (node, idx)).collect(),
+        );
     }
-    todo!()
+    let mut indices_transitions: Vec<_> = (0..transitions.len()).collect();
+    let closure = |idx: &usize| -> &ABWPhi { &transitions[*idx] };
+    let accessor: ClosureAccessor<_, _> = closure.into();
+    // filter new transitions
+    transitions_simpl_keyed(&mut indices_transitions, accessor, |idx| {
+        !not_removable.contains(idx)
+    });
+    // patch old indices
+    for (accepting_idx, v) in new_accepting.into_iter() {
+        for (node, idx) in v.into_iter() {
+            // has to be found
+            let (new_idx, _) = indices_transitions
+                .iter()
+                .enumerate()
+                .find(|(_, old_idx)| **old_idx == idx)
+                .unwrap();
+            out.accepting[accepting_idx].push((node, new_idx));
+        }
+    }
+    let transitions_final = abwphi_to_gbwphi(
+        m,
+        indices_transitions
+            .into_iter()
+            .map(|idx| transitions[idx].clone())
+            .collect(),
+        out,
+        rejecting_accepting_map,
+    );
+    out.phi.insert(node, transitions_final);
+    node
 }
 
-fn vwabw_to_gbw(m: &ABW) -> GBA {
-    todo!()
+fn vwabw_to_gbw(m: &ABW) -> GBW {
+    let mut gbw = GBW::new();
+    let root = vwabw_to_gbw_rec(
+        m,
+        BTreeSet::from_iter(std::iter::once(m.initial)),
+        &mut gbw,
+        &mut HashMap::new(),
+    );
+    gbw.initial = root;
+    gbw.finalize();
+    gbw
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::AsDot;
     use super::*;
     #[test]
@@ -504,5 +660,70 @@ mod tests {
         let automata = ltl_to_abw(formulas.access(normalized));
         let dot = (&automata).as_dot().to_string();
         std::println!("{dot}");
+    }
+
+    // TODO: node merging not working correctly
+    #[test]
+    fn test_simple3() {
+        let mut formulas = ltl::Formulas::default();
+        let t = formulas.constant(true);
+        let f = formulas.constant(false);
+        let p = formulas.atom(1);
+        let q = formulas.atom(2);
+        let u1 = formulas.until(t, p);
+        let u2 = formulas.until(t, u1);
+        let u1u2 = formulas.and(u1, u2);
+        let r = formulas.release(f, u2);
+        let normalized = formulas.normalize(u2);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        std::println!("{}", (&automata).as_dot())
+    }
+
+    #[test]
+    fn test_gbw1() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let t = formulas.constant(true);
+        let f = formulas.constant(false);
+        let Fp = formulas.until(t, p);
+        let GFp = formulas.release(f, Fp);
+        let automata = ltl_to_abw(formulas.access(GFp));
+        let gbw = vwabw_to_gbw(&automata);
+        let dot = (&gbw).as_dot().to_string();
+        std::println!("{dot}");
+    }
+
+    #[test]
+    fn test_gbw2() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let r = formulas.atom(2);
+        let q = formulas.atom(3);
+        let Gr = formulas.globally(r);
+        let q_and_Gr = formulas.and(q, Gr);
+        let Fq_and_Gr = formulas.finally(q_and_Gr);
+        let Fp = formulas.finally(p);
+        let GFp = formulas.globally(Fp);
+        let intermediate = formulas.and(GFp, Fp);
+        let res = formulas.and(intermediate, Fq_and_Gr);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        std::println!("{}", (&gbw).as_dot())
+    }
+
+    #[test]
+    fn test_gbw3() {
+        let mut formulas = ltl::Formulas::default();
+        let t = formulas.constant(true);
+        let f = formulas.constant(false);
+        let p = formulas.atom(1);
+        let u1 = formulas.until(t, p);
+        let u2 = formulas.until(t, u1);
+        let r = formulas.release(f, u2);
+        let normalized = formulas.normalize(r);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        std::println!("{}", (&gbw).as_dot())
     }
 }
