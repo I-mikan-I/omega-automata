@@ -25,6 +25,26 @@ Currently, this crate supports the following:
 With the planned features, it will be possible to check LTL formulas for
 satisfiability.
 
+## Example
+
+Let's start with the LTL formula $\varphi = \left(\square \lozenge x_1 \wedge \lozenge
+x_1\right) \wedge \left(\lozenge\left(x_3 \wedge \square x_2\right)\right)$.  
+Intuitively, $\varphi$ states that any sequence $w = s_1, s_2, s_3, \dotsc \in
+X^\omega$ of variable assignments (the structure LTL is interpreted over) must
+first have infinite $x_1 \in s_i$ (also pronounced *$w$ must have infinitely
+often $x_1$*), and second it must eventually reach a position $s_k$ such that
+$x_3, x_2 \in s_k$ and $x_2 \in s_j$ for all $s_j$ following $s_k$ (also
+pronounced $x_2$ must hold from $s_k$).
+
+Translating the LTL formula $\varphi$ to a GBW results in the following
+automata. The GBW has two sets of accepting edges (green and pink). In order to
+accept and infinite word, its run must take infinite edges from both sets.
+Notice that the node labels are more verbose due to being automatically
+generated using multiple normalization steps.
+ ![Example GBW](./resources/example1.svg)
+Looking closely, one can see that the automata accepts exactly the words
+satisfying $\varphi$.
+
 
 ## Resources
 

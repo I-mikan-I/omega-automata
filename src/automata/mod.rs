@@ -644,6 +644,7 @@ mod tests {
         std::println!("{dot}");
     }
     #[test]
+    // (GF1 /\ F1) /\ (F(3 /\ G2))
     fn test_simple2() {
         let mut formulas = ltl::Formulas::default();
         let p = formulas.atom(1);
