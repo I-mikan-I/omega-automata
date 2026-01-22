@@ -3,6 +3,7 @@ pub struct DotGBW<'a>(&'a GBW);
 use std::{
     cmp,
     collections::{BTreeSet, HashMap, HashSet},
+    hash::BuildHasher,
     iter,
 };
 
@@ -13,17 +14,18 @@ use crate::automata::{
 
 use super::util::*;
 
-pub type GWBPhi = (BTreeSet<i64>, Q);
+pub type GBWPhi = (BTreeSet<i64>, Q);
 pub type GBWAccepting = Vec<(Q, usize)>;
 #[derive(Debug, Clone)]
 pub struct GBW {
     nodes: u32,
     initial: Q,
     labels: Vec<String>,
-    phi: HashMap<Q, Vec<GWBPhi>>,
+    phi: HashMap<Q, Vec<GBWPhi>>,
     // accepting transitions
     accepting: Vec<GBWAccepting>,
-    unique_cache: HashMap<BTreeSet<Q>, Q>,
+    nodes_unique_cache: HashMap<u64, Q>,
+    conjunction_unique_cache: HashMap<BTreeSet<Q>, Q>,
 }
 
 impl GBW {
@@ -32,14 +34,15 @@ impl GBW {
     fn new() -> Self {
         let labels = vec!["true".into()];
         let phi = HashMap::from_iter(iter::once((0u32, vec![(BTreeSet::new(), 0u32)])));
-        let unique_cache = HashMap::from_iter(std::iter::once((BTreeSet::new(), 0)));
+        let conjunction_unique_cache = HashMap::from_iter(std::iter::once((BTreeSet::new(), 0)));
         Self {
             nodes: 1,
             initial: 0,
             labels,
             phi,
             accepting: Default::default(),
-            unique_cache,
+            nodes_unique_cache: Default::default(),
+            conjunction_unique_cache,
         }
     }
     // add TRUE to each accepting set
@@ -47,6 +50,44 @@ impl GBW {
         for t_i in &mut self.accepting {
             t_i.push((Self::TRUE, 0));
         }
+    }
+
+    fn cache_new_node(&mut self, phi: &mut Vec<GBWPhi>, label: &str, new_node_id: Q) -> Option<Q> {
+        let hash = self.nodes_unique_cache.hasher().hash_one(&(*phi));
+        if let Some(q) = self.nodes_unique_cache.get(&hash) {
+            // update phi
+            for (_, node) in phi.iter_mut() {
+                assert!(node != q);
+                if node == &SELF {
+                    *node = *q;
+                }
+            }
+            // new transition implications impossible: if another transition to q existed, then the hash could not have been equal (hashes only use SELF for loops)
+            phi.sort();
+            if &self.phi[q] == phi {
+                self.labels[*q as usize].push_str(&format!("\\n{}", label));
+                return Some(*q);
+            } else {
+                // undo modifications
+                phi.iter_mut().for_each(|(_, node)| {
+                    assert!(node != &new_node_id);
+                    assert!(node != &SELF);
+                    if node == q {
+                        *node = new_node_id;
+                    }
+                });
+            }
+        } else {
+            self.nodes_unique_cache.insert(hash, new_node_id);
+            phi.iter_mut().for_each(|(_, node)| {
+                assert!(node != &new_node_id);
+                if node == &SELF {
+                    *node = new_node_id;
+                }
+            });
+        }
+        phi.sort();
+        None
     }
 }
 
@@ -108,11 +149,11 @@ fn abwphi_to_gbwphi(
     abwphi: Vec<super::abw::ABWPhi>,
     out: &mut GBW,
     rejecting_accepting_map: &mut HashMap<Q, usize>,
-) -> Vec<GWBPhi> {
+) -> Vec<GBWPhi> {
     abwphi
         .into_iter()
         .map(|(syms, states)| {
-            let node = vwabw_to_gbw_rec(m, states, out, rejecting_accepting_map);
+            let node = vwabw_to_gbw_rec(m, &states, out, rejecting_accepting_map);
             (syms, node)
         })
         .collect()
@@ -120,25 +161,24 @@ fn abwphi_to_gbwphi(
 
 fn vwabw_to_gbw_rec(
     m: &ABW,
-    state: BTreeSet<Q>,
+    state: &BTreeSet<Q>,
     out: &mut GBW,
     rejecting_accepting_map: &mut HashMap<Q, usize>,
 ) -> u32 {
-    if let Some(id) = out.unique_cache.get(&state) {
+    if let Some(id) = out.conjunction_unique_cache.get(state) {
         return *id;
     }
     let node = out.nodes;
     out.nodes += 1;
-    out.unique_cache.insert(state.clone(), node);
+    out.conjunction_unique_cache.insert(state.clone(), node);
     let label = state
         .iter()
         .map(|&q| m.get_label(q))
         .fold(String::new(), |a, n| a + n + "\\n");
     out.labels.push(label);
-    // true
     let mut transitions: Vec<ABWPhi> = vec![(Default::default(), Default::default())];
     for q in state {
-        let trans2 = m.get_transition(&q);
+        let trans2 = m.get_transition(q);
         transitions = abwphi_and(transitions.iter(), trans2.iter());
     }
     // let trans = abwphi_to_gbwphi(m, trans, out);
@@ -180,6 +220,30 @@ fn vwabw_to_gbw_rec(
     transitions_simpl_keyed(&mut indices_transitions, accessor, |idx| {
         !not_removable.contains(idx)
     });
+    let mut transitions_final = abwphi_to_gbwphi(
+        m,
+        indices_transitions
+            .iter()
+            .map(|idx| transitions[*idx].clone())
+            .collect(),
+        out,
+        rejecting_accepting_map,
+    );
+    for (_, target) in transitions_final.iter_mut() {
+        assert!(*target != SELF);
+        if *target == node {
+            *target = SELF;
+        }
+    }
+    transitions_final.sort();
+    if let Some(q) = out.cache_new_node(
+        &mut transitions_final,
+        &out.labels[node as usize].clone(),
+        node,
+    ) {
+        return q;
+    }
+    out.phi.insert(node, transitions_final);
     // patch old indices
     for (accepting_idx, v) in new_accepting.into_iter() {
         for (node, idx) in v.into_iter() {
@@ -192,28 +256,61 @@ fn vwabw_to_gbw_rec(
             out.accepting[accepting_idx].push((node, new_idx));
         }
     }
-    let transitions_final = abwphi_to_gbwphi(
-        m,
-        indices_transitions
-            .into_iter()
-            .map(|idx| transitions[idx].clone())
-            .collect(),
-        out,
-        rejecting_accepting_map,
-    );
-    out.phi.insert(node, transitions_final);
     node
 }
 
+// remove unreachable
 pub fn vwabw_to_gbw(m: &ABW) -> GBW {
     let mut gbw = GBW::new();
     let root = vwabw_to_gbw_rec(
         m,
-        BTreeSet::from_iter(std::iter::once(m.get_initial())),
+        &BTreeSet::from_iter(std::iter::once(m.get_initial())),
         &mut gbw,
         &mut HashMap::new(),
     );
     gbw.initial = root;
     gbw.finalize();
+
+    let mut on_stack: Vec<bool> = vec![false; gbw.nodes as usize];
+    let mut stack: Vec<Q> = vec![root];
+    on_stack[root as usize] = true;
+    let add_nodes = |q, stack: &mut Vec<Q>, on_stack: &mut Vec<bool>| {
+        gbw.phi[&q]
+            .iter()
+            .map(|&(_, succ)| succ)
+            .filter(|&q| {
+                if on_stack[q as usize] {
+                    false
+                } else {
+                    on_stack[q as usize] = true;
+                    true
+                }
+            })
+            .for_each(|q| stack.push(q));
+    };
+    add_nodes(root, &mut stack, &mut on_stack);
+    while let Some(q) = stack.pop() {
+        add_nodes(q, &mut stack, &mut on_stack);
+    }
+    for q in 0..gbw.nodes {
+        if !on_stack[q as usize] {
+            gbw.phi.remove(&q);
+            gbw.labels[q as usize] = "".into();
+        }
+    }
+    // remove from accepting edges
+    gbw.accepting = gbw
+        .accepting
+        .into_iter()
+        .map(|transitions| {
+            transitions
+                .into_iter()
+                .filter(|&(q, _)| on_stack[q as usize])
+                .collect()
+        })
+        .collect();
+    gbw.nodes_unique_cache.clear();
+    gbw.conjunction_unique_cache.clear();
+
     gbw
 }

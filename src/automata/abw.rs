@@ -42,6 +42,58 @@ impl ABW {
     pub fn get_initial(&self) -> Q {
         self.initial
     }
+
+    /*
+    Potential improvements: Insertion sort sorting for modified sets.
+    phi has to use SELF instead of new_node_id. Will be updated to new_node_id if result is None.
+     */
+    fn cache_new_node(
+        &mut self,
+        phi: &mut Vec<ABWPhi>,
+        label: &str,
+        rejecting: bool,
+        new_node_id: Q,
+    ) -> Option<Q> {
+        let hash = self.nodes_unique_cache.hasher().hash_one(&(*phi));
+        // marker used for self loops
+        if let Some(q) = self.nodes_unique_cache.get(&hash) {
+            // update phi
+            for (_, nodes) in phi.iter_mut() {
+                assert!(!nodes.contains(q));
+                if nodes.contains(&SELF) {
+                    nodes.remove(&SELF);
+                    nodes.insert(*q);
+                }
+            }
+            // new transition implications impossible: if another transition to q existed, then the hash could not have been equal (hashes only use SELF for loops)
+            phi.sort();
+            if &self.phi[q] == phi && (rejecting == self.rejecting.contains(q)) {
+                self.labels[*q as usize].push_str(&format!("\\n{}", label));
+                return Some(*q);
+            } else {
+                // undo modifications
+                phi.iter_mut().for_each(|(_, nodes)| {
+                    assert!(!nodes.contains(&new_node_id));
+                    assert!(!nodes.contains(&SELF));
+                    if nodes.contains(q) {
+                        nodes.remove(q);
+                        nodes.insert(new_node_id);
+                    }
+                });
+            }
+        } else {
+            self.nodes_unique_cache.insert(hash, new_node_id);
+            phi.iter_mut().for_each(|(_, nodes)| {
+                assert!(!nodes.contains(&new_node_id));
+                if nodes.contains(&SELF) {
+                    nodes.remove(&SELF);
+                    nodes.insert(new_node_id);
+                }
+            });
+        }
+        phi.sort();
+        None
+    }
 }
 pub struct DotABW<'a>(&'a ABW);
 
@@ -141,6 +193,9 @@ impl Accessor<ABWPhi, ABWPhi> for IdentityAccessor {
 fn id(t: &ABWPhi) -> &ABWPhi {
     t
 }
+/**
+ * Simplifies VWABW transitions and sorts them lexicographically.
+ */
 pub fn transitions_simpl_keyed<K, A: Accessor<K, ABWPhi>, F: Fn(&K) -> bool>(
     transitions: &mut Vec<K>,
     access: A,
@@ -283,36 +338,9 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
             (phi_new, false)
         }
     };
+    if let Some(q) = abw.cache_new_node(&mut new_phi, f.to_string().as_str(), rejecting, abw.nodes)
     {
-        let hash = abw.nodes_unique_cache.hasher().hash_one(&new_phi);
-        if let Some(q) = abw.nodes_unique_cache.get(&hash) {
-            let mut phi_expected: Vec<_> = new_phi
-                .iter()
-                .cloned()
-                .map(|(syms, mut nodes)| {
-                    if nodes.contains(&SELF) {
-                        nodes.remove(&SELF);
-                        nodes.insert(*q);
-                    }
-                    (syms, nodes)
-                })
-                .collect();
-            transitions_simpl(&mut phi_expected);
-            if abw.phi[q] == phi_expected && (rejecting == abw.rejecting.contains(q)) {
-                abw.labels[*q as usize].push_str(&format!("\\n{}", f));
-                return *q;
-            }
-        } else {
-            abw.nodes_unique_cache.insert(hash, abw.nodes);
-            new_phi.iter_mut().for_each(|(_, nodes)| {
-                assert!(!nodes.contains(&abw.nodes));
-                if nodes.contains(&SELF) {
-                    nodes.remove(&SELF);
-                    nodes.insert(abw.nodes);
-                }
-            });
-            transitions_simpl(&mut new_phi);
-        }
+        return q;
     }
     abw.phi.insert(abw.nodes, new_phi);
     if rejecting {
@@ -355,14 +383,11 @@ pub fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
     }
     for q in 0..abw.nodes {
         if !on_stack[q as usize] {
-            let hash = abw.nodes_unique_cache.hasher().hash_one(&abw.phi[&q]);
-            if abw.nodes_unique_cache.get(&hash) == Some(&q) {
-                abw.nodes_unique_cache.remove(&hash);
-            }
             abw.phi.remove(&q);
             abw.labels[q as usize] = "".into();
             abw.rejecting.remove(&q);
         }
     }
+    abw.nodes_unique_cache.clear();
     abw
 }
