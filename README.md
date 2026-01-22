@@ -48,11 +48,13 @@ satisfying $\varphi$.
 Finally, using a well-known translation from GBW to NBW, we end up with the
 following automaton. ![Example NBW](./resources/example2.svg) The numbers you
 see at the bottom of each node count the maximum index of acceptance set visited
-thus far in the corresponding GBW. Because the translated GBW had two sets of accepting edges,
-we end up with three variants: A zero-labeled node has not traversed an accepting edge in the first set yet,
-a one-labeled node has traversed an edge in the first set, and a two-labeled node has traversed edges in both sets.
-The nodes with the highest number are *accepting* nodes, and may 'reset' to lower numbers.
-This NBW can now be checked for language emptiness to find out if the original LTL formula is satisfiable.
+thus far in the corresponding GBW. Because the translated GBW had two sets of
+accepting edges, we end up with three variants: A zero-labeled node has not
+traversed an accepting edge in the first set yet, a one-labeled node has
+traversed an edge in the first set, and a two-labeled node has traversed edges
+in both sets. The nodes with the highest number are *accepting* nodes, and may
+'reset' to lower numbers. This NBW can now be checked for language emptiness to
+find out if the original LTL formula is satisfiable.
 
 ## Resources
 
