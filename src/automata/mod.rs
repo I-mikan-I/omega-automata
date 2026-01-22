@@ -1,11 +1,12 @@
 #![allow(clippy::upper_case_acronyms)]
 mod abw;
 mod gbw;
+mod nbw;
 mod util;
 
 use std::collections::*;
-use util::*;
 pub use util::Q;
+use util::*;
 
 #[derive(Debug, Default, Clone)]
 struct NBW {
@@ -24,6 +25,7 @@ mod tests {
     use super::AsDot;
     use super::abw::ltl_to_abw;
     use crate::automata::gbw::vwabw_to_gbw;
+    use crate::automata::nbw::gbw_to_nbw;
     use crate::ltl;
     #[test]
     fn example_test() {
@@ -125,5 +127,25 @@ mod tests {
         let automata = ltl_to_abw(formulas.access(normalized));
         let gbw = vwabw_to_gbw(&automata);
         std::println!("{}", (&gbw).as_dot())
+    }
+
+    #[test]
+    fn test_nbw2() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let r = formulas.atom(2);
+        let q = formulas.atom(3);
+        let Gr = formulas.globally(r);
+        let q_and_Gr = formulas.and(q, Gr);
+        let Fq_and_Gr = formulas.finally(q_and_Gr);
+        let Fp = formulas.finally(p);
+        let GFp = formulas.globally(Fp);
+        let intermediate = formulas.and(GFp, Fp);
+        let res = formulas.and(intermediate, Fq_and_Gr);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        let nbw = gbw_to_nbw(&gbw);
+        std::println!("{}", (&nbw).as_dot())
     }
 }

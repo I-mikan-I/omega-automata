@@ -9,21 +9,23 @@ use std::{
 
 use crate::automata::{
     AsDot,
-    abw::{ABW, ABWPhi, abwphi_and, transition_cmp, transitions_simpl_keyed},
+    abw::{ABW, ABWPhi, abwphi_and, transition_cmp},
+    util::transitions_simpl_keyed,
 };
 
 use super::util::*;
 
 pub type GBWPhi = (BTreeSet<i64>, Q);
-pub type GBWAccepting = Vec<(Q, usize)>;
+pub type GBWAccepting = (Q, usize);
+type GBWAcceptingSet = Vec<GBWAccepting>;
 #[derive(Debug, Clone)]
 pub struct GBW {
-    nodes: u32,
-    initial: Q,
+    pub nodes: u32,
+    pub initial: Q,
     labels: Vec<String>,
     phi: HashMap<Q, Vec<GBWPhi>>,
     // accepting transitions
-    accepting: Vec<GBWAccepting>,
+    accepting: Vec<GBWAcceptingSet>,
     nodes_unique_cache: HashMap<u64, Q>,
     conjunction_unique_cache: HashMap<BTreeSet<Q>, Q>,
 }
@@ -31,6 +33,22 @@ pub struct GBW {
 impl GBW {
     // create with true state
     const TRUE: Q = 0;
+    const NO_TRANSITIONS: [GBWPhi; 0] = [];
+    pub fn num_accepting(&self) -> usize {
+        self.accepting.len()
+    }
+    pub fn get_accepting_set(&self, index: usize) -> Option<&[GBWAccepting]> {
+        self.accepting.get(index).map(|v| v.as_slice())
+    }
+    pub fn label(&self, q: Q) -> &str {
+        &self.labels[q as usize]
+    }
+    pub fn transitions(&self, q: Q) -> &[GBWPhi] {
+        self.phi
+            .get(&q)
+            .map(|v| v.as_slice())
+            .unwrap_or(&Self::NO_TRANSITIONS)
+    }
     fn new() -> Self {
         let labels = vec!["true".into()];
         let phi = HashMap::from_iter(iter::once((0u32, vec![(BTreeSet::new(), 0u32)])));

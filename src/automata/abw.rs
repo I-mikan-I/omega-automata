@@ -14,6 +14,23 @@ use std::{
 };
 
 pub type ABWPhi = (BTreeSet<i64>, BTreeSet<Q>);
+impl Transition for ABWPhi {
+    fn implies(&self, other: &Self) -> Implication {
+        let syms1 = &self.0;
+        let syms2 = &other.0;
+
+        let states1 = &self.1;
+        let states2 = &other.1;
+
+        if states1.is_subset(states2) && syms_subset(syms2, syms1) {
+            Implication::Implies
+        } else if states2.is_subset(states1) && syms_subset(syms1, syms2) {
+            Implication::Implied
+        } else {
+            Implication::None
+        }
+    }
+}
 #[derive(Debug, Default, Clone)]
 pub struct ABW {
     nodes: u32,
@@ -174,70 +191,6 @@ pub fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering>
     } else {
         None
     }
-}
-
-use std::borrow::Borrow;
-
-pub struct IdentityAccessor {}
-
-impl<'this> AccessorLifetime<'this, &'this Self, ABWPhi> for IdentityAccessor {
-    type Item = &'this ABWPhi;
-}
-
-impl Accessor<ABWPhi, ABWPhi> for IdentityAccessor {
-    fn access<'a>(&self, k: &'a ABWPhi) -> <Self as AccessorLifetime<'a, &'a Self, ABWPhi>>::Item {
-        k
-    }
-}
-
-fn id(t: &ABWPhi) -> &ABWPhi {
-    t
-}
-/**
- * Simplifies VWABW transitions and sorts them lexicographically.
- */
-pub fn transitions_simpl_keyed<K, A: Accessor<K, ABWPhi>, F: Fn(&K) -> bool>(
-    transitions: &mut Vec<K>,
-    access: A,
-    removable: F,
-) {
-    'outer: for i in 0..transitions.len() {
-        let mut k = i + 1;
-        while k < transitions.len() {
-            let left = access.access(&transitions[i]);
-            let right = access.access(&transitions[k]);
-            let result = transition_cmp(left.borrow(), right.borrow());
-            drop(left);
-            drop(right);
-            match result {
-                Some(cmp::Ordering::Less) => {
-                    if removable(&transitions[i]) {
-                        transitions.remove(i);
-                    }
-                    continue 'outer;
-                }
-                Some(cmp::Ordering::Greater) => {
-                    if removable(&transitions[k]) {
-                        transitions.remove(k);
-                    }
-                    continue;
-                }
-                None => {}
-                _ => panic!(),
-            }
-            k += 1;
-        }
-    }
-    transitions.sort_by(|l, r| {
-        let lv = access.access(l);
-        let rv = access.access(r);
-        lv.borrow().cmp(rv.borrow())
-    });
-}
-
-fn transitions_simpl(transitions: &mut Vec<ABWPhi>) {
-    let acc = IdentityAccessor {};
-    transitions_simpl_keyed(transitions, acc, |_| true);
 }
 
 pub fn abwphi_and<

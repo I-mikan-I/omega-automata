@@ -14,12 +14,12 @@ complexity via omega automata.
 
 Currently, this crate supports the following:
 
-- LTL to VWABW (*very weak alternating büchi automata*) translation.
-- VWABW to GBW (*generalized büchi automata*) translation.
+- LTL to VWABW (*very weak alternating Büchi automaton*) translation.
+- VWABW to GBW (*generalized Büchi automaton*) translation.
+- GBW to NBW (*non-deterministic Büchi automaton)
 
 ## Planned features
 
-- GBW to NBW (*non-deterministic büchi automata*) translation.
 - NBW emptiness check.
 
 With the planned features, it will be possible to check LTL formulas for
@@ -37,14 +37,22 @@ $x_3, x_2 \in s_k$ and $x_2 \in s_j$ for all $s_j$ following $s_k$ (also
 pronounced $x_2$ must hold from $s_k$).
 
 Translating the LTL formula $\varphi$ to a GBW results in the following
-automata. The GBW has two sets of accepting edges (green and pink). In order to
+automaton. The GBW has two sets of accepting edges (green and pink). In order to
 accept and infinite word, its run must take infinite edges from both sets.
 Notice that the node labels are more verbose due to being automatically
 generated using multiple normalization steps.
  ![Example GBW](./resources/example1.svg)
-Looking closely, one can see that the automata accepts exactly the words
+Looking closely, one can see that the automaton accepts exactly the words
 satisfying $\varphi$.
 
+Finally, using a well-known translation from GBW to NBW, we end up with the
+following automaton. ![Example NBW](./resources/example2.svg) The numbers you
+see at the bottom of each node count the maximum index of acceptance set visited
+thus far in the corresponding GBW. Because the translated GBW had two sets of accepting edges,
+we end up with three variants: A zero-labeled node has not traversed an accepting edge in the first set yet,
+a one-labeled node has traversed an edge in the first set, and a two-labeled node has traversed edges in both sets.
+The nodes with the highest number are *accepting* nodes, and may 'reset' to lower numbers.
+This NBW can now be checked for language emptiness to find out if the original LTL formula is satisfiable.
 
 ## Resources
 
