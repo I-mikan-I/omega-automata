@@ -31,8 +31,8 @@ Let's start with the LTL formula $\varphi = \left(\square \lozenge x_1 \wedge \l
 x_1\right) \wedge \left(\lozenge\left(x_3 \wedge \square x_2\right)\right)$.  
 Intuitively, $\varphi$ states that any sequence $w = s_1, s_2, s_3, \dotsc \in
 X^\omega$ of variable assignments (the structure LTL is interpreted over) must
-first have infinite $x_1 \in s_i$ (also pronounced *$w$ must have infinitely
-often $x_1$*), and second it must eventually reach a position $s_k$ such that
+first have infinite $x_1 \in s_i$ (also pronounced $w$ *must have infinitely
+often* $x_1$), and second it must eventually reach a position $s_k$ such that
 $x_3, x_2 \in s_k$ and $x_2 \in s_j$ for all $s_j$ following $s_k$ (also
 pronounced $x_2$ must hold from $s_k$).
 
