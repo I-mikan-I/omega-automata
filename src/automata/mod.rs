@@ -25,7 +25,7 @@ mod tests {
     use super::AsDot;
     use super::abw::ltl_to_abw;
     use crate::automata::gbw::vwabw_to_gbw;
-    use crate::automata::nbw::gbw_to_nbw;
+    use crate::automata::nbw::{gbw_to_nbw, is_nonempty};
     use crate::ltl;
     #[test]
     fn example_test() {
@@ -147,5 +147,87 @@ mod tests {
         let gbw = vwabw_to_gbw(&automata);
         let nbw = gbw_to_nbw(&gbw);
         std::println!("{}", (&nbw).as_dot())
+    }
+
+    #[test]
+    fn test_sat1() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let r = formulas.atom(2);
+        let q = formulas.atom(3);
+        let Gr = formulas.globally(r);
+        let q_and_Gr = formulas.and(q, Gr);
+        let Fq_and_Gr = formulas.finally(q_and_Gr);
+        let Fp = formulas.finally(p);
+        let GFp = formulas.globally(Fp);
+        let intermediate = formulas.and(GFp, Fp);
+        let res = formulas.and(intermediate, Fq_and_Gr);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        let nbw = gbw_to_nbw(&gbw);
+        let sat = is_nonempty(&nbw);
+        assert!(sat)
+    }
+
+    #[test]
+    fn test_unsat1() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let r = formulas.atom(2);
+        let q = formulas.atom(3);
+        let Gr = formulas.globally(r);
+        let q_and_Gr = formulas.and(q, Gr);
+        let Fq_and_Gr = formulas.finally(q_and_Gr);
+        let Fp = formulas.finally(p);
+        let GFp = formulas.globally(Fp);
+        let intermediate = formulas.and(GFp, Fp);
+        let notr = formulas.neg(r);
+        let Fnotr = formulas.finally(notr);
+        let GFnotr = formulas.globally(Fnotr);
+        let res = formulas.and(intermediate, Fq_and_Gr);
+        let res = formulas.and(res, GFnotr);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        let nbw = gbw_to_nbw(&gbw);
+        let sat = is_nonempty(&nbw);
+        assert!(!sat)
+    }
+
+    #[test]
+    fn test_sat2() {
+        let mut formulas = ltl::Formulas::default();
+        let p = formulas.atom(1);
+        let r = formulas.atom(2);
+        let q = formulas.atom(3);
+        let Gr = formulas.globally(r);
+        let q_and_Gr = formulas.and(q, Gr);
+        let Fq_and_Gr = formulas.finally(q_and_Gr);
+        let Fp = formulas.finally(p);
+        let GFp = formulas.globally(Fp);
+        let intermediate = formulas.and(GFp, Fp);
+        let notp = formulas.neg(p);
+        let Fnotp = formulas.finally(notp);
+        let GFnotp = formulas.globally(Fnotp);
+        let res = formulas.and(intermediate, Fq_and_Gr);
+        let res = formulas.and(res, GFnotp);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        let nbw = gbw_to_nbw(&gbw);
+        let sat = is_nonempty(&nbw);
+        assert!(sat)
+    }
+    #[test]
+    fn test_unsat2() {
+        let mut formulas = ltl::Formulas::default();
+        let res = formulas.constant(false);
+        let normalized = formulas.normalize(res);
+        let automata = ltl_to_abw(formulas.access(normalized));
+        let gbw = vwabw_to_gbw(&automata);
+        let nbw = gbw_to_nbw(&gbw);
+        let sat = is_nonempty(&nbw);
+        assert!(!sat)
     }
 }

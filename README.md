@@ -17,13 +17,15 @@ Currently, this crate supports the following:
 - LTL to VWABW (*very weak alternating Büchi automaton*) translation.
 - VWABW to GBW (*generalized Büchi automaton*) translation.
 - GBW to NBW (*non-deterministic Büchi automaton)
-
-## Planned features
-
 - NBW emptiness check.
 
-With the planned features, it will be possible to check LTL formulas for
-satisfiability.
+### Checking LTL formula satsifiability
+
+1. Construct an LTL formula
+2. Convert it to a VWABW $\mathit{AM}$
+3. Convert $\mathit{AM}$ to a GBW $\mathit{GM}$
+4. Convert $\mathit{GM}$ to an NWB $\mathit{NM}$
+5. Check the emptyness of $\mathit{NM}$: It is non-empty iff. the LTL formula is satisfiable.
 
 ## Example
 
@@ -38,7 +40,7 @@ pronounced $x_2$ must hold from $s_k$).
 
 Translating the LTL formula $\varphi$ to a GBW results in the following
 automaton. The GBW has two sets of accepting edges (green and pink). In order to
-accept and infinite word, its run must take infinite edges from both sets.
+accept an infinite word, its run must take infinite edges from both sets.
 Notice that the node labels are more verbose due to being automatically
 generated using multiple normalization steps.
  ![Example GBW](./resources/example1.svg)

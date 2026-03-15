@@ -221,3 +221,42 @@ pub fn gbw_to_nbw(gbw: &GBW) -> NBW {
     gbw_to_nbw_rec(gbw, &mut nbw, gbw.initial, 0, &mut HashMap::new());
     nbw
 }
+
+fn nbw_reachability(nbw: &NBW) -> Vec<Vec<Q>> {
+    let mut reachable = vec![HashSet::new(); nbw.nodes as usize];
+
+    for _ in 0..nbw.nodes {
+        for node in 0..nbw.nodes {
+            if !nbw.phi.contains_key(&node) {
+                continue;
+            }
+            let successors = nbw.phi[&node].iter().map(|(_, node)| node);
+
+            for succ in successors {
+                reachable[node as usize].insert(*succ);
+                let mut old_set = HashSet::new();
+                std::mem::swap(&mut old_set, &mut reachable[node as usize]);
+                old_set.extend(reachable[*succ as usize].iter());
+                reachable[node as usize] = old_set;
+            }
+        }
+    }
+
+    reachable
+        .into_iter()
+        .map(|set| set.into_iter().collect())
+        .collect()
+}
+
+pub fn is_nonempty(nbw: &NBW) -> bool {
+    let reachability = nbw_reachability(nbw);
+    let init = nbw.initial;
+    for accepting in &nbw.accepting {
+        if reachability[init as usize].contains(accepting)
+            && reachability[*accepting as usize].contains(accepting)
+        {
+            return true;
+        }
+    }
+    false
+}
