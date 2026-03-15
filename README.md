@@ -1,5 +1,8 @@
 # ω-Automata
 
+[![Crates.io Version](https://img.shields.io/crates/v/omega-automata?style=for-the-badge&link=https%3A%2F%2Fcrates.io%2Fcrates%2Fomega-automata)](https://crates.io/crates/omega-automata)
+
+
 This rust library implements decision procedures and algorithms on
 __omega-automata__. __Omega-automata__ are similar to the better-known finite
 automata (NFA/DFA/...) except they operate on *infinite* words. They are
