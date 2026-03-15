@@ -1,3 +1,5 @@
+/// Wraps a [GBW] for printing its state machine as [DOT](https://graphviz.org/doc/info/lang.html)
+/// using [std::fmt::Display].
 pub struct DotGBW<'a>(&'a GBW);
 
 use std::{
@@ -15,9 +17,23 @@ use crate::automata::{
 
 use super::util::*;
 
+/// Data type representing a transition.
+///
+/// [`BTreeSet<i64>`] represents a set of inputs that can take the transition
+/// (the alphabet of an [GBW] are boolean assignments to each symbol).
+/// The set represents a conjunctive formula `v_i && !v_j && ...`.
+/// Any assignment to symbols that satisfy the formula can take the transition.
+/// A positive literal `v_i` is encoded as: `+i`, `-i` encodes a negativie literal.
+///
+/// [Q] represents the next state.
+///
 pub type GBWPhi = (BTreeSet<i64>, Q);
+/// Represents an accepting **transition** of the generalized Büchi automata.
+/// The accepting transition is from state [Q] at index [usize] (`GBW::transitions(self, state)[index]`).
 pub type GBWAccepting = (Q, usize);
-type GBWAcceptingSet = Vec<GBWAccepting>;
+/// Represents a set of accepting transitions.
+pub type GBWAcceptingSet = Vec<GBWAccepting>;
+/// Data type for a generalized Büchi automata.
 #[derive(Debug, Clone)]
 pub struct GBW {
     pub nodes: u32,
@@ -34,15 +50,20 @@ impl GBW {
     // create with true state
     const TRUE: Q = 0;
     const NO_TRANSITIONS: [GBWPhi; 0] = [];
+    /// Gets the number of accepting sets of transitions. An accepting run must visit some states from each set
+    /// infinitely often.
     pub fn num_accepting(&self) -> usize {
         self.accepting.len()
     }
+    /// Gets the accepting transition set at `index`.
     pub fn get_accepting_set(&self, index: usize) -> Option<&[GBWAccepting]> {
         self.accepting.get(index).map(|v| v.as_slice())
     }
+    /// Gets the label of state `q`, this is usually an LTL formula.
     pub fn label(&self, q: Q) -> &str {
         &self.labels[q as usize]
     }
+    /// Gets the transitions from `q`
     pub fn transitions(&self, q: Q) -> &[GBWPhi] {
         self.phi
             .get(&q)
@@ -277,7 +298,10 @@ fn vwabw_to_gbw_rec(
     node
 }
 
-// remove unreachable
+/// Converts a very weak [ABW] to a [GBW].
+/// Any [ABW] generated via [ltl_to_abw](super::abw::ltl_to_abw) is very weak.
+/// 
+/// <div class="warning">The conversion if incorrect if the ABW is not very weak!</div>
 pub fn vwabw_to_gbw(m: &ABW) -> GBW {
     let mut gbw = GBW::new();
     let root = vwabw_to_gbw_rec(

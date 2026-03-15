@@ -1,9 +1,3 @@
-/*
-Two states can be merged if: both are rejecting (or not) and their outgoing transitions are the same.
-
-
-*/
-
 use super::AsDot;
 use super::util::*;
 use crate::ltl;
@@ -13,6 +7,17 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
 };
 
+/// Data type representing a transition.
+///
+/// [`BTreeSet<i64>`] represents a set of inputs that can take the transition
+/// (the alphabet of an [ABW] are boolean assignments to each symbol).
+/// The set represents a conjunctive formula `v_i && !v_j && ...`.
+/// Any assignment to symbols that satisfy the formula can take the transition.
+/// A positive literal `v_i` is encoded as: `+i`, `-i` encodes a negativie literal.
+///
+/// [`BTreeSet<Q>`] represents the conjunction of states that need to be satisfied by
+/// the tail of the infinite run on the alternating automata.
+///
 pub type ABWPhi = (BTreeSet<i64>, BTreeSet<Q>);
 impl Transition for ABWPhi {
     fn implies(&self, other: &Self) -> Implication {
@@ -32,6 +37,7 @@ impl Transition for ABWPhi {
     }
 }
 #[derive(Debug, Default, Clone)]
+/// Data type representing an alternatic co-büchi automata.
 pub struct ABW {
     nodes: u32,
     initial: Q,
@@ -47,15 +53,27 @@ pub struct ABW {
 }
 
 impl ABW {
+    /// Gets a label (usually an LTL formula) for the node `key`.
     pub fn get_label(&self, key: Q) -> &str {
         &self.labels[key as usize]
     }
+    /// Gets the transition function for `node`.
+    /// The slice encodes a disjunction of transitions.
+    ///
+    /// # Example
+    ///
+    /// For an assignment of propositional variables **T_i**
+    /// as part of an infinite word `T_0,...,T_i,...`,
+    /// the [ABW] can take any transition at step **i** from `node` in the returned slice that
+    /// is satisfied by `T_i`. This effectively encodes a disjunctive normal form (see [ABWPhi]).
     pub fn get_transition(&self, node: &Q) -> &[ABWPhi] {
         &self.phi[node]
     }
+    /// Gets the rejecting nodes of the co-büchi acceptance condition.
     pub fn get_rejecting(&self) -> impl std::iter::Iterator<Item = &Q> {
         self.rejecting.iter()
     }
+    /// Gets the initial state of the [ABW].
     pub fn get_initial(&self) -> Q {
         self.initial
     }
@@ -112,6 +130,8 @@ impl ABW {
         None
     }
 }
+/// Wraps an [ABW] for printing its state machine as [DOT](https://graphviz.org/doc/info/lang.html)
+/// using [std::fmt::Display].
 pub struct DotABW<'a>(&'a ABW);
 
 impl<'a> std::fmt::Display for DotABW<'a> {
@@ -173,7 +193,7 @@ impl<'a> AsDot for &'a ABW {
 /**
  * trans1 < trans2 <=> trans1.0 \subseteq trans2.0 and trans1.1 \supseteq trans2.1 (trans1 implies trans2)
  */
-pub fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering> {
+pub(crate) fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering> {
     let syms1 = &trans1.0;
     let syms2 = &trans2.0;
 
@@ -193,7 +213,7 @@ pub fn transition_cmp(trans1: &ABWPhi, trans2: &ABWPhi) -> Option<cmp::Ordering>
     }
 }
 
-pub fn abwphi_and<
+pub(crate) fn abwphi_and<
     Q: std::borrow::Borrow<ABWPhi>,
     I: std::iter::Iterator<Item = Q>,
     I2: std::iter::Iterator<Item = Q> + Clone,
@@ -305,9 +325,11 @@ fn ltl_to_abw_rec(f: ltl::Formula<'_>, abw: &mut ABW) -> u32 {
     abw.nodes - 1
 }
 
-/**
- * Must be normalized.
- */
+/// Converts a **normalized** [LTL formula](ltl::Formula) to an [ABW].
+/// 
+/// # Panics
+/// 
+/// If `f` is **not** normalized (see [Formulas::normalize](ltl::Formulas::normalize)).
 pub fn ltl_to_abw(f: ltl::Formula<'_>) -> ABW {
     let mut abw = ABW::default();
     let root = ltl_to_abw_rec(f, &mut abw);

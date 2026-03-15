@@ -1,7 +1,7 @@
 #![allow(clippy::upper_case_acronyms)]
-mod abw;
-mod gbw;
-mod nbw;
+pub mod abw;
+pub mod gbw;
+pub mod nbw;
 mod util;
 
 use std::collections::*;
@@ -14,7 +14,8 @@ struct NBW {
     accepting: HashSet<Q>,
 }
 
-trait AsDot {
+/// Trait for converting to a type [AsDot::T] that prints as a [DOT](https://graphviz.org/doc/info/lang.html) graph.
+pub trait AsDot {
     type T: std::fmt::Display;
     fn as_dot(&self) -> Self::T;
 }

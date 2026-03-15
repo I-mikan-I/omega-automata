@@ -11,7 +11,17 @@ use crate::automata::{
     util::{Implication, SELF, Transition, syms_subset, transitions_simpl},
 };
 
-type NBWPhi = (BTreeSet<i64>, Q);
+/// Data type representing a transition.
+///
+/// [`BTreeSet<i64>`] represents a set of inputs that can take the transition
+/// (the alphabet of an [NBW] are boolean assignments to each symbol).
+/// The set represents a conjunctive formula `v_i && !v_j && ...`.
+/// Any assignment to symbols that satisfy the formula can take the transition.
+/// A positive literal `v_i` is encoded as: `+i`, `-i` encodes a negativie literal.
+///
+/// [Q] represents the next state.
+///
+pub type NBWPhi = (BTreeSet<i64>, Q);
 
 impl Transition for NBWPhi {
     fn implies(&self, other: &Self) -> super::util::Implication {
@@ -29,6 +39,7 @@ impl Transition for NBWPhi {
     }
 }
 
+/// Data type for a non-deterministic Büchi automata.
 pub struct NBW {
     nodes: Q,
     initial: Q,
@@ -88,6 +99,8 @@ impl NBW {
     }
 }
 
+/// Wraps a [NBW] for printing its state machine as [DOT](https://graphviz.org/doc/info/lang.html)
+/// using [std::fmt::Display].
 pub struct DotNBW<'a>(&'a NBW);
 
 impl<'a> Display for DotNBW<'a> {
@@ -216,6 +229,7 @@ fn gbw_to_nbw_rec(
     new_state
 }
 
+/// Converts a [GBW] to an [NBW].
 pub fn gbw_to_nbw(gbw: &GBW) -> NBW {
     let mut nbw = NBW::new();
     gbw_to_nbw_rec(gbw, &mut nbw, gbw.initial, 0, &mut HashMap::new());
@@ -248,6 +262,8 @@ fn nbw_reachability(nbw: &NBW) -> Vec<Vec<Q>> {
         .collect()
 }
 
+/// Checks if the language of `nbw` is not empty.
+/// For a `nbw` converted from an LTL formula, this is equal to the original formula being satisfiable (see [ltl](super::super::ltl)).
 pub fn is_nonempty(nbw: &NBW) -> bool {
     let reachability = nbw_reachability(nbw);
     let init = nbw.initial;

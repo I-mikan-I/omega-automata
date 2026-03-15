@@ -1,5 +1,9 @@
 use super::automata::Q;
 
+/// Data type for representing an operation of the LTL formula.
+/// [Q] is a propositional logic atom, for example `q` or `p`, encoded
+/// as a number. [u32] represents indices into the formula that contains the Operator.
+/// 
 #[derive(Debug, Clone, Copy)]
 pub enum Operator {
     Atom(Q),
@@ -12,9 +16,11 @@ pub enum Operator {
 }
 
 use Operator::*;
+/// Data type for representing a set of (sub-) formulas.
 #[derive(Default)]
 pub struct Formulas(Vec<Operator>);
-pub struct Formula<'a>(pub &'a Formulas, pub u32);
+/// Wrapper for representing a single formula inside a set of [Formulas].
+pub struct Formula<'a>(pub(crate) &'a Formulas, pub(crate) u32);
 
 impl<'a> From<Formula<'a>> for u32 {
     fn from(value: Formula<'a>) -> Self {
@@ -23,6 +29,7 @@ impl<'a> From<Formula<'a>> for u32 {
 }
 
 impl Formulas {
+    /// Adds the boolean constant `val` to the set of formulas and returns its index.
     pub fn constant(&mut self, val: bool) -> u32 {
         let idx = self.atom(1);
         let idx2 = self.neg(idx);
@@ -32,53 +39,70 @@ impl Formulas {
             self.and(idx, idx2)
         }
     }
+    /// Adds the propositional variable `id` to the set of formulas and returns its index.
     pub fn atom(&mut self, id: Q) -> u32 {
         assert!(id > 0);
         self.0.push(Atom(id));
         self.0.len() as u32 - 1
     }
+    /// Negates the subforuma at `index`. Returns the index of the negated subformula.
     pub fn neg(&mut self, index: u32) -> u32 {
         assert!((index as usize) < self.0.len());
         self.0.push(Neg(index));
         self.0.len() as u32 - 1
     }
+    /// Adds the LTL subformula ○φ (Next(φ)) and returns its index.
+    /// φ is the formula at `index`.
     pub fn next(&mut self, index: u32) -> u32 {
         assert!((index as usize) < self.0.len());
         self.0.push(X(index));
         self.0.len() as u32 - 1
     }
+    /// Adds the LTL subformula φUψ (φ Until ψ) and returns its index.
+    /// φ is the formula at `index_hold`, ψ is the formula at `index_until`.
     pub fn until(&mut self, index_hold: u32, index_until: u32) -> u32 {
         assert!((index_hold as usize) < self.0.len());
         assert!((index_until as usize) < self.0.len());
         self.0.push(U(index_hold, index_until));
         self.0.len() as u32 - 1
     }
-    pub fn globally(&mut self, index_holds: u32) -> u32 {
+    /// Adds the LTL subformula Gφ (Globally(φ)) and returns its index.
+    /// φ is the formula at `index`.
+    pub fn globally(&mut self, index: u32) -> u32 {
         let f = self.constant(false);
-        self.release(f, index_holds)
+        self.release(f, index)
     }
+    /// Adds the LTL subformula Fφ (Finally(φ)) and returns its index.
+    /// φ is the formula at `index`.
     pub fn finally(&mut self, index_until: u32) -> u32 {
         let t = self.constant(true);
         self.until(t, index_until)
     }
+    /// Adds the LTL subformula φRψ (φ Release ψ) and returns its index.
+    /// φ is the formula at `index_release`, ψ is the formula at `index_holds`.
     pub fn release(&mut self, index_release: u32, index_holds: u32) -> u32 {
         assert!((index_release as usize) < self.0.len());
         assert!((index_holds as usize) < self.0.len());
         self.0.push(R(index_release, index_holds));
         self.0.len() as u32 - 1
     }
+    /// Adds the LTL subformula φ∧ψ (φ and ψ) and returns its index.
+    /// φ is the formula at `x`, ψ is the formula at `y`.
     pub fn and(&mut self, x: u32, y: u32) -> u32 {
         assert!((x as usize) < self.0.len());
         assert!((y as usize) < self.0.len());
         self.0.push(And(x, y));
         self.0.len() as u32 - 1
     }
+    /// Adds the LTL subformula φ∨ψ (φ or ψ) and returns its index.
+    /// φ is the formula at `x`, ψ is the formula at `y`.
     pub fn or(&mut self, x: u32, y: u32) -> u32 {
         assert!((x as usize) < self.0.len());
         assert!((y as usize) < self.0.len());
         self.0.push(Or(x, y));
         self.0.len() as u32 - 1
     }
+    /// Accesses the subformula at `index`.
     pub fn access<'a>(&'a self, index: u32) -> Formula<'a> {
         assert!((index as usize) < self.0.len());
         Formula(self, index)
@@ -122,6 +146,10 @@ impl Formulas {
             }
         }
     }
+    /// Normalizes the subformula at `index` and returns its new index.
+    /// <div class="warning">
+    ///     This is a prerequisite for any automata conversion.
+    /// </div>
     pub fn normalize(&mut self, index: u32) -> u32 {
         assert!((index as usize) < self.0.len());
         match self.0[index as usize] {

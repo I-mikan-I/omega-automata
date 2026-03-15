@@ -1,7 +1,13 @@
 [package]
 name = "omega-automata"
+authors = ["Konrad Winslow"]
 version = "0.1.0"
+description = "Algorithms on omega (infinite word) automata and LTL logic."
+license = "Apache-2.0"
 edition = "2024"
+repository = "https://github.com/I-mikan-I/omega-automata"
+keywords = ["model_checking", "automata", "ltl", "deicision_procedures", "theory"]
+categories = ["algorithms", "data-structures", "mathematics", ]
 
 [dependencies]
 bitvec = "1.0.1"

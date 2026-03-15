@@ -16,7 +16,7 @@ Currently, this crate supports the following:
 
 - LTL to VWABW (*very weak alternating Büchi automaton*) translation.
 - VWABW to GBW (*generalized Büchi automaton*) translation.
-- GBW to NBW (*non-deterministic Büchi automaton)
+- GBW to NBW (*non-deterministic Büchi automaton*) translation
 - NBW emptiness check.
 
 ### Checking LTL formula satsifiability
