@@ -37,7 +37,7 @@ impl Transition for ABWPhi {
     }
 }
 #[derive(Debug, Default, Clone)]
-/// Data type representing an alternatic co-büchi automata.
+/// Data type representing an alternating co-Büchi automata.
 pub struct ABW {
     nodes: u32,
     initial: Q,
@@ -69,7 +69,7 @@ impl ABW {
     pub fn get_transition(&self, node: &Q) -> &[ABWPhi] {
         &self.phi[node]
     }
-    /// Gets the rejecting nodes of the co-büchi acceptance condition.
+    /// Gets the rejecting nodes of the co-Büchi acceptance condition.
     pub fn get_rejecting(&self) -> impl std::iter::Iterator<Item = &Q> {
         self.rejecting.iter()
     }
